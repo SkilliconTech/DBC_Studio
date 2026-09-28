@@ -2850,7 +2850,7 @@ class DBCStudio(QMainWindow):
                 self.databases[path] = (
                     database
                 )
-
+                self.pending_save_as.add(os.path.abspath(path))
                 successful.append(
                     path
                 )
@@ -3352,7 +3352,7 @@ class DBCStudio(QMainWindow):
       if not needs_save_as:
         save_path = current_path
       else:
-        default_name = os.path.basename(current_path)
+        default_name = current_path
         save_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save DBC File",
@@ -3416,6 +3416,7 @@ class DBCStudio(QMainWindow):
             self.update_database_tree()
             self.update_statistics()
             self.show_overview()
+            self.save_session()
 
           return True
 
