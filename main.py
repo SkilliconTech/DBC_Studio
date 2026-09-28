@@ -299,8 +299,8 @@ class SignalEditorDialog(QDialog):
 
         self.setWindowTitle("Signal Editor")
         self.setFixedWidth(850)
-        self.setMinimumHeight(600)
         self.setup_ui()
+        self.resize(850, self.minimumSizeHint().height())
 
     def setup_ui(self):
         root = QVBoxLayout(self)
@@ -339,12 +339,15 @@ class SignalEditorDialog(QDialog):
 
         self.refresh_table()
         self.signal_table.itemSelectionChanged.connect(self.table_signal_selected)
-        root.addWidget(self.signal_table, 0)
-        self.signal_table.setMaximumHeight(120)
-
+        self.signal_table.setMinimumHeight(120)
+        self.signal_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        root.addWidget(self.signal_table, 1)
         
 
-        lower = QHBoxLayout()
+        lower_widget = QWidget()
+        lower_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        lower = QHBoxLayout(lower_widget)
+        lower.setContentsMargins(0, 0, 0, 0)
         properties = QGroupBox("Properties")
         properties_layout = QVBoxLayout(properties)
         properties_layout.setSpacing(6)
@@ -419,7 +422,7 @@ class SignalEditorDialog(QDialog):
 
         lower.addWidget(properties, 2)
         lower.addWidget(position, 1)
-        root.addLayout(lower, 1)
+        root.addWidget(lower_widget, 0)
 
         buttons = QHBoxLayout()
         new_button = QPushButton("New")
