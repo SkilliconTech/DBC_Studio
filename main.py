@@ -5149,9 +5149,9 @@ class DBCStudio(QMainWindow):
                 text in message.name.lower()
                 or
                 (
-                    text.startswitch("0x")
+                    text.startswith("0x")
                     and
-                    text in f"0x{message.frame_id:X}".lower
+                    text in f"0x{message.frame_id:X}".lower()
                 )
             ):
 
@@ -5198,7 +5198,7 @@ class DBCStudio(QMainWindow):
                         0,
                         Qt.UserRole,
                         (
-                            "signal",
+                           "signal",
                             message,
                             signal
                         )
