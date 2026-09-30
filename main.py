@@ -1,3 +1,4 @@
+from platform import node
 import sys
 import os
 import re
@@ -2332,14 +2333,23 @@ class DBCStudio(QMainWindow):
 
         for message in database.messages:
             if message.senders:
-                message.senders = [
-                    node_name if sender == old_name else sender
-                    for sender in message.senders
+                updated = [
+                node_name if sender == old_name else sender
+                for sender in message.senders
                 ]
+                try:
+                   message.senders[:] = updated
+                except Exception:
+                   message._senders = updated
 
         self.update_database_tree()
         self.update_statistics()
         self.show_node_details(node)
+
+    def copy_node(self, node):
+     if node is None:
+        return
+     self.copied_node = node
 
     def paste_node(self, target_node=None):
         database = self.get_current_database()
@@ -2347,23 +2357,80 @@ class DBCStudio(QMainWindow):
             return
 
         source_node = self.copied_node
-        existing_names = {node.name for node in database.nodes}
+        existing_node_names = {node.name for node in database.nodes}
         base_name = source_node.name + "_copy"
         new_name = base_name
         index = 2
 
-        while new_name in existing_names:
+        while new_name in existing_node_names:
             new_name = f"{base_name}{index}"
             index += 1
 
         try:
-            node = cantools.database.can.Node(
-                name=new_name
+            new_node = cantools.database.can.Node(name=new_name)
+            database.nodes.append(new_node)
+
+       
+            source_messages = [
+                message for message in database.messages
+                if message.senders and source_node.name in message.senders
+            ]
+
+            existing_message_names = {message.name for message in database.messages}
+            for source_message in source_messages:
+            # Unique message name
+             msg_base = source_message.name + "_copy"
+             msg_name = msg_base
+             msg_index = 2
+             while msg_name in existing_message_names:
+                msg_name = f"{msg_base}{msg_index}"
+                msg_index += 1
+             existing_message_names.add(msg_name)
+
+             new_signals = []
+             for signal in source_message.signals:
+                new_signal = cantools.database.can.Signal(
+                    name=signal.name,
+                    start=signal.start,
+                    length=signal.length,
+                    byte_order=signal.byte_order,
+                    is_signed=signal.is_signed,
+                    minimum=signal.minimum,
+                    maximum=signal.maximum,
+                    unit=signal.unit,
+                    comment=getattr(signal, "comment", "") or "",
+                    is_multiplexer=signal.is_multiplexer,
+                    multiplexer_ids=getattr(signal, "multiplexer_ids", None),
+                    multiplexer_signal=getattr(signal, "multiplexer_signal", None),
+                )
+                new_signal.scale = getattr(signal, "scale", 1.0)
+                new_signal.offset = getattr(signal, "offset", 0.0)
+                new_signals.append(new_signal)
+             if source_message.senders:
+                new_senders = [
+                    new_name if sender == source_node.name else sender
+                    for sender in source_message.senders
+                ]
+            else:
+                new_senders = [new_name]
+
+            new_message = cantools.database.can.Message(
+                frame_id=source_message.frame_id,
+                name=msg_name,
+                length=source_message.length,
+                signals=new_signals,
+                senders=new_senders,
+                comment=getattr(source_message, "comment", "") or "",
+                is_extended_frame=source_message.is_extended_frame,
+                strict=False,
             )
-            database.nodes.append(node)
-            self.update_database_tree()
+            database.messages.append(new_message)
+             
+
+            self.update_database_tree(force_expand_key=("node", new_name))
+            
             self.update_statistics()
-            self.show_node_details(node)
+            self.show_node_details(new_node)
         except Exception as error:
             QMessageBox.warning(
                 self,
@@ -2390,15 +2457,28 @@ class DBCStudio(QMainWindow):
 
         try:
             node_name = node.name
-            database.nodes.remove(node)
+            database.nodes[:] = [
+                n for n in list(database.nodes)
+                if n is not node and n.name != node_name
+            ]
+            remaining_messages = []
+            for message in list(database.messages):
+                if not message.senders or node_name not in message.senders:
+                    remaining_messages.append(message)
+                    continue
+           
+           
 
-            for message in database.messages:
-                if message.senders:
-                    message.senders = [
-                        sender for sender in message.senders
-                        if sender != node_name
-                    ]
+                other_senders = [s for s in message.senders if s != node_name]
 
+                if other_senders:
+                  try:
+                    message.senders[:] = other_senders
+                  except Exception:
+                    message._senders = other_senders
+                  remaining_messages.append(message)
+            database.messages[:] = remaining_messages
+            
             self.update_database_tree()
             self.update_statistics()
             self.show_overview()
@@ -4282,7 +4362,7 @@ class DBCStudio(QMainWindow):
 
                     if modifiers & Qt.ControlModifier and key == Qt.Key_C:
                         if data[0] == "node":
-                            self.copied_node = data[1]
+                            self.copy_node(data[1])
                         elif data[0] == "message":
                             self.copy_message(data[1])
                         elif data[0] == "signal":
@@ -4414,7 +4494,7 @@ class DBCStudio(QMainWindow):
             if selected_action == new_message_action:
                 self.create_message_for_node(data[1])
             elif selected_action == copy_action:
-                self.copied_node = data[1]
+                self.copy_node(data[1])
             elif selected_action == paste_action:
                 self.paste_node(data[1])
             elif selected_action == rename_action:
