@@ -6,6 +6,10 @@ import csv
 from turtle import width
 import cantools
 import xml.etree.ElementTree as ET
+import sys, os
+def resource_path(rel):
+    base = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(base, rel)
 
 from PySide6.QtCore import Qt, QSettings, Signal, QSize, QEvent, QPoint, QByteArray, QStringListModel
 from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QFontMetrics, QPixmap, QIcon, QCursor, QColor,QShortcut,QKeySequence
