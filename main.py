@@ -220,6 +220,41 @@ class ArrowDoubleSpinBox(QDoubleSpinBox):
 # =============================================================
 # SIGNAL EDITOR
 # =============================================================
+class ArrowTree(QTreeWidget):
+    """Tree that draws its own expand/collapse arrows so the arrow
+    turns white on the selected (blue) row."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.arrow_idle = QColor("#FFFFFF")
+
+    def drawBranches(self, painter, rect, index):
+        if not self.model().hasChildren(index):
+            return
+
+        selected = self.selectionModel().isSelected(index)
+        color = QColor("#FFFFFF") if selected else self.arrow_idle
+
+        size = self.indentation()
+        cell_x = rect.right() - size + 1
+        cx = cell_x + size // 2
+        cy = rect.top() + rect.height() // 2
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = painter.pen()
+        pen.setColor(color)
+        pen.setWidthF(1.8)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+
+        if self.isExpanded(index):
+            points = [QPoint(cx - 4, cy - 2), QPoint(cx, cy + 2), QPoint(cx + 4, cy - 2)]
+        else:
+            points = [QPoint(cx - 2, cy - 4), QPoint(cx + 2, cy), QPoint(cx - 2, cy + 4)]
+        painter.drawPolyline(points)
+        painter.restore()
 
 class NewValueTableDialog(QDialog):
 
@@ -1546,7 +1581,19 @@ HELP_TOPICS = [
 # =============================================================
 # HELP WINDOW
 # =============================================================
+class NoZoomTextBrowser(QTextBrowser):
+    def wheelEvent(self, event):
+        # Block Ctrl + wheel zoom
+        if event.modifiers() & Qt.ControlModifier:
+            event.accept()
+            return
+        super().wheelEvent(event)
 
+    def event(self, event):
+        # Block touchpad pinch zoom
+        if event.type() == QEvent.NativeGesture:
+            return True
+        return super().event(event)
 class HelpDialog(QDialog):
 
     COLORS = {
@@ -1562,7 +1609,7 @@ class HelpDialog(QDialog):
         super().__init__(parent)
         self.theme = theme if theme in self.COLORS else "dark"
         self.setWindowTitle("DBC Studio Help")
-        self.resize(1080, 720)
+        self.setFixedSize(750, 520)
 
         self.topics = {}
         self.order = []
@@ -1647,31 +1694,30 @@ class HelpDialog(QDialog):
         self.crumb.setObjectName("helpCrumb")
         right_layout.addWidget(self.crumb)
 
-        self.browser = QTextBrowser()
+        self.browser = NoZoomTextBrowser()
         self.browser.setOpenLinks(False)
         self.browser.anchorClicked.connect(self._link)
         right_layout.addWidget(self.browser, 1)
 
         nav = QHBoxLayout()
         self.btn_prev = QPushButton("◀  Previous")
-        self.btn_up = QPushButton("Up")
         self.btn_next = QPushButton("Next  ▶")
-        for button in (self.btn_prev, self.btn_up, self.btn_next):
+        for button in (self.btn_prev, self.btn_next):
             button.setObjectName("helpTool")
             button.setCursor(QCursor(Qt.PointingHandCursor))
         self.btn_prev.clicked.connect(self.go_prev)
-        self.btn_up.clicked.connect(self.go_up)
         self.btn_next.clicked.connect(self.go_next)
         nav.addWidget(self.btn_prev)
-        nav.addStretch()
-        nav.addWidget(self.btn_up)
         nav.addStretch()
         nav.addWidget(self.btn_next)
         right_layout.addLayout(nav)
 
+        self.left.setFixedWidth(220)
         self.split.addWidget(self.left)
         self.split.addWidget(right)
-        self.split.setSizes([300, 780])
+        self.split.setSizes([220, 500])
+        self.split.setStretchFactor(0, 0)
+        self.split.setStretchFactor(1, 1)
         root.addWidget(self.split, 1)
 
     def _apply_theme(self):
@@ -1753,7 +1799,6 @@ class HelpDialog(QDialog):
         index = self.order.index(tid)
         self.btn_prev.setEnabled(index > 0)
         self.btn_next.setEnabled(index < len(self.order) - 1)
-        self.btn_up.setEnabled(topic["parent"] is not None)
 
         self._highlight(highlight or [])
 
@@ -1767,10 +1812,7 @@ class HelpDialog(QDialog):
         if index < len(self.order) - 1:
             self.open_topic(self.order[index + 1])
 
-    def go_up(self):
-        parent = self.topics[self.current]["parent"]
-        if parent:
-            self.open_topic(parent)
+
 
     def _link(self, url):
         target = url.toString()
@@ -2441,7 +2483,7 @@ class DBCStudio(QMainWindow):
             tree_title
         )
 
-        self.sidebar_tree = QTreeWidget()
+        self.sidebar_tree = ArrowTree()
 
         self.sidebar_tree.setObjectName(
             "sidebarTree"
@@ -4680,6 +4722,10 @@ class DBCStudio(QMainWindow):
         """Apply the selected theme."""
         base_style = LIGHT_STYLE if self.current_theme == "light" else DARK_STYLE
         app.setStyleSheet(base_style)
+        self.sidebar_tree.arrow_idle = QColor(
+            "#000000" if self.current_theme == "light" else "#FFFFFF"
+        )
+        self.sidebar_tree.viewport().update()
         self.update_search_clear_button_style()
 
     def eventFilter(self, watched, event):
