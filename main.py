@@ -13,6 +13,10 @@ def resource_path(rel):
 
 from PySide6.QtCore import Qt, QSettings, Signal, QSize, QEvent, QPoint, QByteArray, QStringListModel
 from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QFontMetrics, QPixmap, QIcon, QCursor, QColor,QShortcut,QKeySequence
+from string import Template
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QTextDocument
+from PySide6.QtWidgets import QTextBrowser, QSplitter, QStackedWidget
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -1309,6 +1313,610 @@ class MessageEditorDialog(QDialog):
         except Exception as error:
             QMessageBox.warning(self, "Delete Error", str(error))
 
+# =============================================================
+# HELP CONTENT
+# =============================================================
+
+def _box(kind, text):
+    label = "Tip" if kind == "tip" else "Note"
+    return (
+        '<table width="100%" cellspacing="0" cellpadding="8"><tr>'
+        f'<td class="{kind}"><b>{label}:</b> {text}</td></tr></table><p></p>'
+    )
+
+
+def _shortcut_table(rows):
+    html = (
+        '<table border="1" cellspacing="0" cellpadding="6" width="100%">'
+        '<tr><th align="left">Shortcut</th><th align="left">Action</th></tr>'
+    )
+    for keys, action in rows:
+        html += f"<tr><td><code>{keys}</code></td><td>{action}</td></tr>"
+    return html + "</table>"
+
+
+# (id, title, html, [children])
+HELP_TOPICS = [
+    ("intro", "Introduction", """
+        <p><b>DBC Studio</b> is a desktop tool for viewing, creating and editing
+        CAN network databases stored in <code>.dbc</code> files. It supports both
+        classic <b>CAN</b> and <b>CAN FD</b> databases and shows everything as a
+        simple tree: <b>DBC file &rarr; Nodes &rarr; Messages &rarr; Signals</b>.</p>
+        <p>New here? Start with the
+        <a href="topic:quickstart">Quick start</a>, or jump straight to
+        <a href="topic:working">Working with DBC Studio</a>.</p>
+    """, [
+        ("what_dbc", "What is a DBC file?", """
+            <p>A DBC file describes the data that travels on a CAN bus.</p>
+            <ul>
+              <li><b>Node</b> - an ECU (device) on the network that sends messages.</li>
+              <li><b>Message</b> - a CAN frame with an identifier (ID), a frame type
+                  (STD or XTD) and a length in bytes.</li>
+              <li><b>Signal</b> - a value packed inside a message: its start bit,
+                  length, byte order, factor, offset, range and unit.</li>
+            </ul>
+        """, []),
+        ("features", "Key features", """
+            <ul>
+              <li>Open several DBC files at once (Import or drag &amp; drop).</li>
+              <li>Create new CAN or CAN FD databases from scratch.</li>
+              <li>Create, edit, copy, paste, rename and delete nodes, messages and signals.</li>
+              <li>Visual 8x8 bit map with overlap detection, paged for CAN FD.</li>
+              <li>Search by name or hex ID, with suggestions as you type.</li>
+              <li>Export to DBC, XML or CSV.</li>
+              <li>Light and dark themes, per-section zoom, and automatic session restore.</li>
+            </ul>
+        """, []),
+        ("quickstart", "Quick start", """
+            <ol>
+              <li>Click <b>Import</b> (or drop a <code>.dbc</code> file onto the window).</li>
+              <li>Click the file in <b>DBC FILES</b>, then expand it in <b>DATABASE STRUCTURE</b>.</li>
+              <li>Double-click a message or signal to edit it.</li>
+              <li>Right-click items to add nodes, messages and signals.</li>
+              <li>Press <code>Ctrl+S</code> to save.</li>
+            </ol>
+        """ + _box("tip", "Press <code>F1</code> at any time. Help opens on the topic that matches what you have selected."), []),
+        ("layout", "Window layout", """
+            <ul>
+              <li><b>Left sidebar</b> - the list of open DBC files, the
+                  <b>Create DBC / Import / Export</b> buttons, and the database tree.</li>
+              <li><b>Top bar</b> - page title, theme button, help button and search box.</li>
+              <li><b>Statistic cards</b> - number of nodes, messages and signals in the current file.</li>
+              <li><b>Main area</b> - details of whatever you select in the tree.</li>
+            </ul>
+        """, []),
+    ]),
+
+    ("working", "Working with DBC Studio", """
+        <p>This chapter explains every part of the application, step by step.
+        Pick a topic from the contents on the left, or continue with
+        <a href="topic:importing">Importing DBC files</a>.</p>
+    """, [
+        ("importing", "Importing DBC files", """
+            <p>There are two ways to open files:</p>
+            <ul>
+              <li>Click <b>Import</b> and choose one or more <code>.dbc</code> files.</li>
+              <li>Drag &amp; drop <code>.dbc</code> files anywhere on the window.</li>
+            </ul>
+            <p>Each file appears in <b>DBC FILES</b>. The last file you opened becomes the
+            current file. If a file cannot be parsed, DBC Studio lists the reason
+            and still opens the others.</p>
+        """, []),
+        ("creating", "Creating a new DBC", """
+            <ol>
+              <li>Click <b>+ Create DBC</b>.</li>
+              <li>Type a file name (<code>.dbc</code> is added automatically).</li>
+              <li>Choose <b>CAN</b> or <b>CAN FD</b>.</li>
+              <li>Click <b>OK</b>.</li>
+            </ol>
+            <p>The new database lives in memory until you save it. Right-click the file
+            in the tree and choose <b>New Node</b> to start building it.</p>
+            """ + _box("note", "<b>CAN</b> messages allow up to 8 data bytes. <b>CAN FD</b> messages allow up to 64."), []),
+        ("saving", "Saving", """
+            <ul>
+              <li>Press <code>Ctrl+S</code>, or click the save icon on the selected file row.</li>
+              <li>Newly created and freshly imported files ask for a location the first
+                  time. After that, saving overwrites the file directly.</li>
+              <li>If you save under a new name, the file list is updated to the new name.</li>
+            </ul>
+        """, []),
+        ("exporting", "Exporting", """
+            <p>Click <b>Export</b>, choose a format, then choose where to save.</p>
+            <table border="1" cellspacing="0" cellpadding="6" width="100%">
+              <tr><th align="left">Format</th><th align="left">Contents</th></tr>
+              <tr><td>DBC</td><td>The standard CAN database file.</td></tr>
+              <tr><td>XML</td><td>Nodes, messages and signals as a structured XML document.</td></tr>
+              <tr><td>CSV</td><td>One row per signal: node, message, ID, frame type, length,
+                  start bit, signal length, byte order, sign, factor, offset, min, max,
+                  unit and description. Opens directly in Excel.</td></tr>
+            </table>
+        """, []),
+        ("removing", "Removing a file", """
+            <p>Click the trash icon on the selected file row and confirm. The file is
+            removed from DBC Studio only. <b>It is not deleted from your disk.</b></p>
+        """ + _box("tip", "Save first if you have unsaved changes."), []),
+        ("explorer", "Database Explorer", """
+            <p>The tree shows <b>DBC file &rarr; Nodes &rarr; Messages &rarr; Signals</b>.
+            Messages that have no sender are grouped under <b>UNASSIGNED MESSAGES</b>.</p>
+            <ul>
+              <li><b>Click</b> an item to see its details in the main area.</li>
+              <li><b>Double-click</b> a message or signal to open its editor.</li>
+              <li><b>Right-click</b> any item for its menu (new, edit, copy, paste, rename, delete).</li>
+            </ul>
+            <p>The tree remembers which branches you had open when it refreshes.</p>
+        """, []),
+        ("nodes", "Nodes", """
+            <ul>
+              <li><b>New node:</b> right-click the DBC file &rarr; <b>New Node</b>, then type a unique name.</li>
+              <li><b>New message:</b> right-click a node &rarr; <b>New Message</b>.</li>
+              <li><b>Rename:</b> select and press <code>F2</code>. Messages sent by the node are updated too.</li>
+              <li><b>Copy / Paste:</b> creates a <code>_copy</code> node together with its messages.</li>
+              <li><b>Delete:</b> removes the node and the messages sent only by it.</li>
+            </ul>
+        """, []),
+        ("messages", "Messages", """
+            <p>Double-click a message (or right-click &rarr; <b>Open Message Editor</b>).</p>
+            <table border="1" cellspacing="0" cellpadding="6" width="100%">
+              <tr><th align="left">Field</th><th align="left">Meaning</th></tr>
+              <tr><td>Name / Description</td><td>Message name and an optional comment.</td></tr>
+              <tr><td>Identifier</td><td>CAN ID in hex (<code>0x123</code>) or decimal.</td></tr>
+              <tr><td>STD / XTD</td><td>Standard (max <code>0x7FF</code>) or extended (max <code>0x1FFFFFFF</code>) frame.</td></tr>
+              <tr><td>Data bytes</td><td>0-8 for CAN, 0-64 for CAN FD.</td></tr>
+            </table>
+            <p>Use <b>Apply</b> to save changes and keep the window open, or <b>OK</b> to save and close.
+            Two messages cannot share the same identifier.</p>
+        """, []),
+        ("signals", "Signals", """
+            <p>Double-click a signal, or right-click a message &rarr; <b>New Signal</b>.</p>
+            <ul>
+              <li><b>Name, Description, Unit</b> - text fields.</li>
+              <li><b>Value type</b> - Unsigned or Signed.</li>
+              <li><b>Scale</b> - Minimum, Maximum, Offset and Factor
+                  (physical value = raw &times; factor + offset).</li>
+              <li><b>Position</b> - Start Bit, Length and Byte order
+                  (Intel/Little or Motorola/Big).</li>
+              <li><b>Multiplex</b> - marks the signal as a multiplexer.</li>
+            </ul>
+            <p>The signal list at the top lets you switch between the signals of the
+            same message. <b>New</b>, <b>Delete</b> and <b>Copy</b> work on the current signal.</p>
+        """, []),
+        ("bitmap", "The bit map", """
+            <p>The grid in the signal editor shows the message payload, one row per byte.</p>
+            <table border="1" cellspacing="0" cellpadding="6">
+              <tr><td bgcolor="#E6B800">&nbsp;&nbsp;</td><td>Bits used by the signal you are editing</td></tr>
+              <tr><td bgcolor="#7A8493">&nbsp;&nbsp;</td><td>Bits used by other signals</td></tr>
+              <tr><td bgcolor="#C62828">&nbsp;&nbsp;</td><td>Conflict: your signal overlaps another one</td></tr>
+            </table>
+            <p>For CAN FD messages longer than 8 bytes, use the <b>&lt;</b> and <b>&gt;</b> buttons
+            to move between pages of 8 bytes. The grid follows your Start Bit and Length automatically.</p>
+        """ + _box("note", "You cannot apply a signal that overlaps another signal or runs past the message length."), []),
+        ("editing", "Copy, paste, rename and delete", """
+            <p>These work on nodes, messages and signals from the tree, using the
+            right-click <b>Edit</b> menu or the keyboard:</p>
+            <ul>
+              <li><code>Ctrl+C</code> / <code>Ctrl+V</code> - copy and paste. Copies get a <code>_copy</code> suffix.</li>
+              <li><code>F2</code> - rename.</li>
+              <li><code>Del</code> - delete (you are asked to confirm).</li>
+            </ul>
+            <p>Names must be unique within their level.</p>
+        """, []),
+        ("search", "Searching", """
+            <p>Type in the search box at the top right. Suggestions appear as you type.</p>
+            <ul>
+              <li>Matches node, message and signal names.</li>
+              <li>Type a hex ID such as <code>0x123</code> to find messages by identifier.</li>
+              <li>Click <b>&times;</b> to clear the search and return to the normal tree.</li>
+            </ul>
+        """, []),
+        ("theme", "Light and dark theme", """
+            <p>Use the theme button next to the help button. Your choice is remembered
+            the next time you start DBC Studio.</p>
+        """, []),
+        ("zoom", "Zoom", """
+            <p>Hold <code>Ctrl</code> and scroll the mouse wheel (or pinch on a touchpad)
+            over a section to zoom just that section between 70% and 150%.
+            A small zoom control appears with a reset button.</p>
+        """, []),
+        ("session", "Session restore", """
+            <p>When you close DBC Studio it remembers the open files and the selected
+            file, and reloads them on the next start if they still exist on disk.</p>
+        """, []),
+    ]),
+
+    ("shortcuts", "Keyboard shortcuts", _shortcut_table([
+        ("Ctrl+S", "Save the current DBC file"),
+        ("F1", "Open help for the selected item"),
+        ("Ctrl+C / Ctrl+V", "Copy / paste node, message or signal"),
+        ("F2", "Rename the selected item"),
+        ("Del", "Delete the selected item"),
+        ("Enter", "Apply and close an editor dialog"),
+        ("Ctrl + mouse wheel", "Zoom the section under the cursor"),
+        ("Alt+Left / Alt+Right", "Help: back / forward"),
+        ("Ctrl+F", "Help: jump to the search box"),
+    ]), []),
+
+    ("trouble", "Troubleshooting", """
+        <table border="1" cellspacing="0" cellpadding="6" width="100%">
+          <tr><th align="left">Message</th><th align="left">What to do</th></tr>
+          <tr><td>Bit(s) ... are already occupied</td>
+              <td>Another signal uses those bits. Change the Start Bit or Length (see <a href="topic:bitmap">The bit map</a>).</td></tr>
+          <tr><td>Signal exceeds the message data size</td>
+              <td>Increase the message's data bytes, or move or shorten the signal.</td></tr>
+          <tr><td>Duplicate identifier</td>
+              <td>Choose an ID that no other message in this DBC uses.</td></tr>
+          <tr><td>Data bytes cannot exceed 8</td>
+              <td>The DBC is a classic CAN database. Use a CAN FD DBC for up to 64 bytes.</td></tr>
+          <tr><td>Invalid CAN ID</td>
+              <td>Standard IDs go up to <code>0x7FF</code>. Switch to XTD for larger IDs.</td></tr>
+          <tr><td>No node exists in this DBC</td>
+              <td>Create a node first, then add messages to it.</td></tr>
+          <tr><td>Some Files Could Not Be Loaded</td>
+              <td>The file is not a valid DBC. The reason is listed in the message.</td></tr>
+        </table>
+    """, []),
+
+    ("about", "About DBC Studio", """
+        <p>DBC Studio is built with Python, <b>PySide6</b> (Qt) and <b>cantools</b>.</p>
+        <p>Press <code>F1</code> any time to come back to this help.</p>
+    """, []),
+]
+
+
+# =============================================================
+# HELP WINDOW
+# =============================================================
+
+class HelpDialog(QDialog):
+
+    COLORS = {
+        "dark": dict(bg="#171A20", panel="#101217", card="#20242C", text="#E4E8ED",
+                     muted="#8A93A1", border="#2C323C", accent="#3B82F6",
+                     hover="#292E37", code="#262B34", tip="#1E3A5F", note="#3B3320"),
+        "light": dict(bg="#FFFFFF", panel="#F5F7FA", card="#FFFFFF", text="#1D2733",
+                      muted="#687385", border="#D4DAE3", accent="#2D6CDF",
+                      hover="#EEF2F7", code="#EEF2F7", tip="#E3EEFF", note="#FFF4D6"),
+    }
+
+    def __init__(self, parent=None, theme="dark", topic="intro"):
+        super().__init__(parent)
+        self.theme = theme if theme in self.COLORS else "dark"
+        self.setWindowTitle("DBC Studio Help")
+        self.resize(1080, 720)
+
+        self.topics = {}
+        self.order = []
+        self.items = {}
+        self.history = []
+        self.hist_pos = -1
+        self.current = None
+
+        self._flatten(HELP_TOPICS, None, "")
+        self._build_ui()
+        self._apply_theme()
+        self.open_topic(topic if topic in self.topics else "intro")
+
+    # ---------- data ----------
+
+    def _flatten(self, nodes, parent, prefix):
+        for index, (tid, title, html, children) in enumerate(nodes, 1):
+            number = f"{prefix}{index}"
+            doc = QTextDocument()
+            doc.setHtml(html)
+            self.topics[tid] = {
+                "id": tid, "title": title, "number": number, "html": html,
+                "parent": parent, "children": [c[0] for c in children],
+                "text": (title + " " + doc.toPlainText()).lower(),
+            }
+            self.order.append(tid)
+            self._flatten(children, tid, number + ".")
+
+    # ---------- UI ----------
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        bar = QFrame()
+        bar.setObjectName("helpBar")
+        bar_layout = QHBoxLayout(bar)
+        bar_layout.setContentsMargins(12, 8, 12, 8)
+        bar_layout.setSpacing(6)
+
+        def tool(text, tip, slot):
+            button = QPushButton(text)
+            button.setObjectName("helpTool")
+            button.setToolTip(tip)
+            button.setCursor(QCursor(Qt.PointingHandCursor))
+            button.clicked.connect(slot)
+            bar_layout.addWidget(button)
+            return button
+
+        self.btn_toc = tool("Hide", "Show / hide the contents panel", self.toggle_contents)
+        self.btn_back = tool("Back", "Back (Alt+Left)", self.go_back)
+        self.btn_fwd = tool("Forward", "Forward (Alt+Right)", self.go_forward)
+        tool("Home", "Go to the introduction", lambda: self.open_topic("intro"))
+        bar_layout.addStretch()
+        tool("A−", "Smaller text", lambda: self.browser.zoomOut(1))
+        tool("A+", "Larger text", lambda: self.browser.zoomIn(1))
+        tool("Print", "Print this page", self.print_page)
+        root.addWidget(bar)
+
+        self.split = QSplitter(Qt.Horizontal)
+        self.split.setChildrenCollapsible(False)
+
+        # left: search + contents / results
+        self.left = QWidget()
+        left_layout = QVBoxLayout(self.left)
+        left_layout.setContentsMargins(12, 12, 6, 12)
+        left_layout.setSpacing(8)
+
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search help...  (Ctrl+F)")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._search)
+        left_layout.addWidget(self.search)
+
+        self.stack = QStackedWidget()
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(16)
+        self.tree.itemClicked.connect(self._tree_clicked)
+        self.results = QListWidget()
+        self.results.itemClicked.connect(self._result_clicked)
+        self.stack.addWidget(self.tree)
+        self.stack.addWidget(self.results)
+        left_layout.addWidget(self.stack, 1)
+
+        def add_item(parent_item, tid):
+            topic = self.topics[tid]
+            item = QTreeWidgetItem(parent_item)
+            item.setText(0, f"{topic['number']}   {topic['title']}")
+            item.setData(0, Qt.UserRole, tid)
+            self.items[tid] = item
+            for child in topic["children"]:
+                add_item(item, child)
+
+        for tid in self.order:
+            if self.topics[tid]["parent"] is None:
+                add_item(self.tree, tid)
+        self.tree.expandToDepth(0)
+
+        # right: breadcrumb + page + prev/up/next
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(6, 12, 12, 12)
+        right_layout.setSpacing(8)
+
+        self.crumb = QLabel()
+        self.crumb.setObjectName("helpCrumb")
+        right_layout.addWidget(self.crumb)
+
+        self.browser = QTextBrowser()
+        self.browser.setOpenLinks(False)
+        self.browser.anchorClicked.connect(self._link)
+        right_layout.addWidget(self.browser, 1)
+
+        nav = QHBoxLayout()
+        self.btn_prev = QPushButton("◀  Previous")
+        self.btn_up = QPushButton("Up")
+        self.btn_next = QPushButton("Next  ▶")
+        for button in (self.btn_prev, self.btn_up, self.btn_next):
+            button.setObjectName("helpTool")
+            button.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_prev.clicked.connect(self.go_prev)
+        self.btn_up.clicked.connect(self.go_up)
+        self.btn_next.clicked.connect(self.go_next)
+        nav.addWidget(self.btn_prev)
+        nav.addStretch()
+        nav.addWidget(self.btn_up)
+        nav.addStretch()
+        nav.addWidget(self.btn_next)
+        right_layout.addLayout(nav)
+
+        self.split.addWidget(self.left)
+        self.split.addWidget(right)
+        self.split.setSizes([300, 780])
+        root.addWidget(self.split, 1)
+
+        QShortcut(QKeySequence("Alt+Left"), self, activated=self.go_back)
+        QShortcut(QKeySequence("Alt+Right"), self, activated=self.go_forward)
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=self._focus_search)
+
+    def _apply_theme(self):
+        self.colors = self.COLORS[self.theme]
+        self.setStyleSheet(Template("""
+            QDialog { background: $bg; }
+            QFrame#helpBar { background: $panel; border-bottom: 1px solid $border; }
+            QPushButton#helpTool {
+                background: $card; color: $text; border: 1px solid $border;
+                border-radius: 7px; padding: 6px 14px; font-weight: 600;
+            }
+            QPushButton#helpTool:hover { border: 1px solid $accent; }
+            QPushButton#helpTool:disabled { color: $muted; }
+            QLineEdit {
+                background: $card; color: $text; border: 1px solid $border;
+                border-radius: 8px; padding: 7px 10px;
+            }
+            QLineEdit:focus { border: 1px solid $accent; }
+            QTreeWidget, QListWidget {
+                background: $panel; color: $text; border: 1px solid $border;
+                border-radius: 8px; outline: none;
+            }
+            QTreeWidget::item, QListWidget::item { padding: 5px 4px; border-radius: 5px; }
+            QTreeWidget::item:hover, QListWidget::item:hover { background: $hover; }
+            QTreeWidget::item:selected, QListWidget::item:selected {
+                background: $accent; color: #FFFFFF;
+            }
+            QTextBrowser {
+                background: $bg; color: $text; border: 1px solid $border;
+                border-radius: 8px; padding: 8px;
+            }
+            QLabel#helpCrumb { color: $muted; font-size: 12px; }
+        """).safe_substitute(self.colors))
+
+    def _css(self):
+        return Template("""
+            body { color: $text; font-size: 13px; }
+            h1 { color: $text; font-size: 24px; }
+            h2, h3 { color: $text; }
+            a { color: $accent; text-decoration: none; }
+            code { background-color: $code; font-family: Consolas, monospace; }
+            th { background-color: $code; }
+            table { border-color: $border; }
+            td.tip { background-color: $tip; }
+            td.note { background-color: $note; }
+        """).safe_substitute(self.colors)
+
+    # ---------- navigation ----------
+
+    def open_topic(self, tid, add_history=True, highlight=None):
+        if tid not in self.topics:
+            return
+
+        if add_history:
+            self.history = self.history[: self.hist_pos + 1]
+            if not self.history or self.history[-1] != tid:
+                self.history.append(tid)
+            self.hist_pos = len(self.history) - 1
+
+        self.current = tid
+        topic = self.topics[tid]
+        self.browser.setHtml(
+            f"<html><head><style>{self._css()}</style></head><body>"
+            f"<h1>{topic['number']}&nbsp;&nbsp;{topic['title']}</h1>{topic['html']}"
+            "</body></html>"
+        )
+
+        item = self.items[tid]
+        self.tree.setCurrentItem(item)
+        if item.parent() is not None:
+            item.parent().setExpanded(True)
+        self.tree.scrollToItem(item)
+
+        path, node = [], tid
+        while node is not None:
+            path.append(self.topics[node]["title"])
+            node = self.topics[node]["parent"]
+        self.crumb.setText("  ›  ".join(reversed(path)))
+
+        index = self.order.index(tid)
+        self.btn_prev.setEnabled(index > 0)
+        self.btn_next.setEnabled(index < len(self.order) - 1)
+        self.btn_up.setEnabled(topic["parent"] is not None)
+        self.btn_back.setEnabled(self.hist_pos > 0)
+        self.btn_fwd.setEnabled(self.hist_pos < len(self.history) - 1)
+
+        self._highlight(highlight or [])
+
+    def go_back(self):
+        if self.hist_pos > 0:
+            self.hist_pos -= 1
+            self.open_topic(self.history[self.hist_pos], add_history=False)
+
+    def go_forward(self):
+        if self.hist_pos < len(self.history) - 1:
+            self.hist_pos += 1
+            self.open_topic(self.history[self.hist_pos], add_history=False)
+
+    def go_prev(self):
+        index = self.order.index(self.current)
+        if index > 0:
+            self.open_topic(self.order[index - 1])
+
+    def go_next(self):
+        index = self.order.index(self.current)
+        if index < len(self.order) - 1:
+            self.open_topic(self.order[index + 1])
+
+    def go_up(self):
+        parent = self.topics[self.current]["parent"]
+        if parent:
+            self.open_topic(parent)
+
+    def toggle_contents(self):
+        visible = not self.left.isVisible()
+        self.left.setVisible(visible)
+        self.btn_toc.setText("Hide" if visible else "Contents")
+
+    def _focus_search(self):
+        if not self.left.isVisible():
+            self.toggle_contents()
+        self.search.setFocus()
+        self.search.selectAll()
+
+    def _link(self, url):
+        target = url.toString()
+        if target.startswith("topic:"):
+            self.open_topic(target[6:])
+
+    def _tree_clicked(self, item, column):
+        tid = item.data(0, Qt.UserRole)
+        if tid:
+            self.open_topic(tid)
+
+    # ---------- search ----------
+
+    def _search(self, text):
+        words = text.lower().split()
+        if not words:
+            self.stack.setCurrentWidget(self.tree)
+            return
+
+        self.results.clear()
+        for tid in self.order:
+            topic = self.topics[tid]
+            if all(word in topic["text"] for word in words):
+                position = topic["text"].find(words[0])
+                snippet = topic["text"][max(0, position - 30): position + 60].replace("\n", " ")
+                item = QListWidgetItem(f"{topic['number']}  {topic['title']}\n…{snippet.strip()}…")
+                item.setData(Qt.UserRole, tid)
+                self.results.addItem(item)
+
+        if self.results.count() == 0:
+            empty = QListWidgetItem("No results found")
+            empty.setFlags(Qt.NoItemFlags)
+            self.results.addItem(empty)
+
+        self.stack.setCurrentWidget(self.results)
+
+    def _result_clicked(self, item):
+        tid = item.data(Qt.UserRole)
+        if tid:
+            self.open_topic(tid, highlight=self.search.text().lower().split())
+
+    def _highlight(self, words):
+        selections = []
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#E6B800"))
+        fmt.setForeground(QColor("#1A1A1A"))
+        document = self.browser.document()
+
+        for word in words:
+            cursor = QTextCursor(document)
+            while True:
+                cursor = document.find(word, cursor)
+                if cursor.isNull():
+                    break
+                selection = QTextEdit.ExtraSelection()
+                selection.cursor = cursor
+                selection.format = fmt
+                selections.append(selection)
+
+        self.browser.setExtraSelections(selections)
+        if selections:
+            first = QTextCursor(selections[0].cursor)
+            first.clearSelection()
+            self.browser.setTextCursor(first)
+            self.browser.ensureCursorVisible()
+
+    # ---------- print ----------
+
+    def print_page(self):
+        printer = QPrinter(QPrinter.HighResolution)
+        dialog = QPrintDialog(printer, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.browser.print_(printer)
 
 # =============================================================
 # MAIN APPLICATION
@@ -1375,7 +1983,7 @@ class DBCStudio(QMainWindow):
         self
         )
         self.help_shortcut = QShortcut(QKeySequence("F1"), self)
-        self.help_shortcut.activated.connect(self.show_help)
+        self.help_shortcut.activated.connect(self.show_context_help)
         self.save_shortcut.activated.connect(
         self.save_current_file
         )
