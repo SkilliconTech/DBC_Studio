@@ -1374,6 +1374,8 @@ class DBCStudio(QMainWindow):
         QKeySequence("Ctrl+S"),
         self
         )
+        self.help_shortcut = QShortcut(QKeySequence("F1"), self)
+        self.help_shortcut.activated.connect(self.show_help)
         self.save_shortcut.activated.connect(
         self.save_current_file
         )
@@ -1519,6 +1521,14 @@ class DBCStudio(QMainWindow):
         self.theme_button.setCursor(QCursor(Qt.PointingHandCursor))
         self.theme_button.clicked.connect(self.toggle_theme)
         header.addWidget(self.theme_button)
+        self.help_button = QToolButton()
+        self.help_button.setObjectName("helpButton")
+        self.help_button.setText("?")
+        self.help_button.setFixedSize(42, 42)
+        self.help_button.setToolTip("Help (F1)")
+        self.help_button.setCursor(QCursor(Qt.PointingHandCursor))
+        self.help_button.clicked.connect(self.show_help)
+        header.addWidget(self.help_button)
 
         self.update_header_icons()
 
@@ -1568,7 +1578,6 @@ class DBCStudio(QMainWindow):
         header.addWidget(
             self.search_box
         )
-
         content_layout.addLayout(
             header
         )
@@ -5307,7 +5316,68 @@ class DBCStudio(QMainWindow):
                     "No results found"
                 ]
             )
+    # =========================================================
+    # HELP
+    # =========================================================
 
+    def show_help(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("DBC Studio Help")
+        dialog.resize(560, 520)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setHtml("""
+            <h2>DBC Studio Help</h2>
+
+            <h3>Getting started</h3>
+            <ul>
+              <li><b>Import</b> or drag &amp; drop one or more <code>.dbc</code> files.</li>
+              <li><b>+ Create DBC</b> makes a new CAN or CAN FD database.</li>
+              <li><b>Export</b> saves the selected file as DBC, XML or CSV.</li>
+            </ul>
+
+            <h3>Database Structure</h3>
+            <ul>
+              <li>Hierarchy: <b>DBC file → Nodes → Messages → Signals</b>.</li>
+              <li>Right-click the DBC file to add a <b>New Node</b>.</li>
+              <li>Right-click a node to add a <b>New Message</b>.</li>
+              <li>Right-click a message to add a <b>New Signal</b> or open the editor.</li>
+              <li>Double-click a message or signal to open its editor.</li>
+            </ul>
+
+            <h3>Keyboard shortcuts</h3>
+            <ul>
+              <li><b>Ctrl+S</b> – Save current DBC</li>
+              <li><b>Ctrl+C / Ctrl+V</b> – Copy / paste node, message or signal</li>
+              <li><b>F2</b> – Rename selected item</li>
+              <li><b>Del</b> – Delete selected item</li>
+              <li><b>F1</b> – Open this help</li>
+              <li><b>Ctrl + mouse wheel</b> – Zoom the section under the cursor</li>
+            </ul>
+
+            <h3>Search</h3>
+            <p>Type a node, message or signal name, or a hex ID such as
+            <code>0x123</code>, in the search bar. Click × to clear it.</p>
+
+            <h3>Theme</h3>
+            <p>Use the theme button next to the search bar to switch
+            between light and dark mode.</p>
+        """)
+        layout.addWidget(text, 1)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+
+        dialog.exec()
     # =========================================================
     # THEME
     # =========================================================
@@ -5756,6 +5826,19 @@ DARK_STYLE = """
         background: #2A3039;
         border: 1px solid #3B82F6;
     }
+        #helpButton {
+        background: #20242C;
+        color: #FFFFFF;
+        border: 1px solid #2C323C;
+        border-radius: 9px;
+        font-size: 20px;
+        font-weight: 700;
+    }
+
+    #helpButton:hover {
+        background: #2A3039;
+        border: 1px solid #3B82F6;
+    }
 
     #statCard {
         background: #20242C;
@@ -6143,6 +6226,19 @@ LIGHT_STYLE = """
     }
 
     #themeButton:hover {
+        background: #F0F4F8;
+        border: 1px solid #3B82F6;
+    }
+        #helpButton {
+        background: #FFFFFF;
+        color: #253140;
+        border: 1px solid #D4DAE3;
+        border-radius: 9px;
+        font-size: 20px;
+        font-weight: 700;
+    }
+
+    #helpButton:hover {
         background: #F0F4F8;
         border: 1px solid #3B82F6;
     }
