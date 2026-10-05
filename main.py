@@ -16,7 +16,6 @@ from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QFontMetrics, 
 from string import Template
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QTextDocument
 from PySide6.QtWidgets import QTextBrowser, QSplitter, QStackedWidget
-from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -1363,7 +1362,7 @@ HELP_TOPICS = [
               <li>Visual 8x8 bit map with overlap detection, paged for CAN FD.</li>
               <li>Search by name or hex ID, with suggestions as you type.</li>
               <li>Export to DBC, XML or CSV.</li>
-              <li>Light and dark themes, per-section zoom, and automatic session restore.</li>
+              <li>Light and dark themes, and automatic session restore.</li>
             </ul>
         """, []),
         ("quickstart", "Quick start", """
@@ -1511,29 +1510,12 @@ HELP_TOPICS = [
             <p>Use the theme button next to the help button. Your choice is remembered
             the next time you start DBC Studio.</p>
         """, []),
-        ("zoom", "Zoom", """
-            <p>Hold <code>Ctrl</code> and scroll the mouse wheel (or pinch on a touchpad)
-            over a section to zoom just that section between 70% and 150%.
-            A small zoom control appears with a reset button.</p>
-        """, []),
+
         ("session", "Session restore", """
             <p>When you close DBC Studio it remembers the open files and the selected
             file, and reloads them on the next start if they still exist on disk.</p>
         """, []),
     ]),
-
-    ("shortcuts", "Keyboard shortcuts", _shortcut_table([
-        ("Ctrl+S", "Save the current DBC file"),
-        ("F1", "Open help for the selected item"),
-        ("Ctrl+C / Ctrl+V", "Copy / paste node, message or signal"),
-        ("F2", "Rename the selected item"),
-        ("Del", "Delete the selected item"),
-        ("Enter", "Apply and close an editor dialog"),
-        ("Ctrl + mouse wheel", "Zoom the section under the cursor"),
-        ("Alt+Left / Alt+Right", "Help: back / forward"),
-        ("Ctrl+F", "Help: jump to the search box"),
-    ]), []),
-
     ("trouble", "Troubleshooting", """
         <table border="1" cellspacing="0" cellpadding="6" width="100%">
           <tr><th align="left">Message</th><th align="left">What to do</th></tr>
@@ -1615,32 +1597,6 @@ class HelpDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-        bar = QFrame()
-        bar.setObjectName("helpBar")
-        bar_layout = QHBoxLayout(bar)
-        bar_layout.setContentsMargins(12, 8, 12, 8)
-        bar_layout.setSpacing(6)
-
-        def tool(text, tip, slot):
-            button = QPushButton(text)
-            button.setObjectName("helpTool")
-            button.setToolTip(tip)
-            button.setCursor(QCursor(Qt.PointingHandCursor))
-            button.clicked.connect(slot)
-            bar_layout.addWidget(button)
-            return button
-
-        self.btn_toc = tool("Hide", "Show / hide the contents panel", self.toggle_contents)
-        self.btn_back = tool("Back", "Back (Alt+Left)", self.go_back)
-        self.btn_fwd = tool("Forward", "Forward (Alt+Right)", self.go_forward)
-        tool("Home", "Go to the introduction", lambda: self.open_topic("intro"))
-        bar_layout.addStretch()
-        tool("A−", "Smaller text", lambda: self.browser.zoomOut(1))
-        tool("A+", "Larger text", lambda: self.browser.zoomIn(1))
-        tool("Print", "Print this page", self.print_page)
-        root.addWidget(bar)
-
         self.split = QSplitter(Qt.Horizontal)
         self.split.setChildrenCollapsible(False)
 
@@ -1651,7 +1607,7 @@ class HelpDialog(QDialog):
         left_layout.setSpacing(8)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search help...  (Ctrl+F)")
+        self.search.setPlaceholderText("Search help...")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._search)
         left_layout.addWidget(self.search)
@@ -1718,15 +1674,10 @@ class HelpDialog(QDialog):
         self.split.setSizes([300, 780])
         root.addWidget(self.split, 1)
 
-        QShortcut(QKeySequence("Alt+Left"), self, activated=self.go_back)
-        QShortcut(QKeySequence("Alt+Right"), self, activated=self.go_forward)
-        QShortcut(QKeySequence("Ctrl+F"), self, activated=self._focus_search)
-
     def _apply_theme(self):
         self.colors = self.COLORS[self.theme]
         self.setStyleSheet(Template("""
             QDialog { background: $bg; }
-            QFrame#helpBar { background: $panel; border-bottom: 1px solid $border; }
             QPushButton#helpTool {
                 background: $card; color: $text; border: 1px solid $border;
                 border-radius: 7px; padding: 6px 14px; font-weight: 600;
@@ -1803,20 +1754,8 @@ class HelpDialog(QDialog):
         self.btn_prev.setEnabled(index > 0)
         self.btn_next.setEnabled(index < len(self.order) - 1)
         self.btn_up.setEnabled(topic["parent"] is not None)
-        self.btn_back.setEnabled(self.hist_pos > 0)
-        self.btn_fwd.setEnabled(self.hist_pos < len(self.history) - 1)
 
         self._highlight(highlight or [])
-
-    def go_back(self):
-        if self.hist_pos > 0:
-            self.hist_pos -= 1
-            self.open_topic(self.history[self.hist_pos], add_history=False)
-
-    def go_forward(self):
-        if self.hist_pos < len(self.history) - 1:
-            self.hist_pos += 1
-            self.open_topic(self.history[self.hist_pos], add_history=False)
 
     def go_prev(self):
         index = self.order.index(self.current)
@@ -1832,17 +1771,6 @@ class HelpDialog(QDialog):
         parent = self.topics[self.current]["parent"]
         if parent:
             self.open_topic(parent)
-
-    def toggle_contents(self):
-        visible = not self.left.isVisible()
-        self.left.setVisible(visible)
-        self.btn_toc.setText("Hide" if visible else "Contents")
-
-    def _focus_search(self):
-        if not self.left.isVisible():
-            self.toggle_contents()
-        self.search.setFocus()
-        self.search.selectAll()
 
     def _link(self, url):
         target = url.toString()
@@ -1909,13 +1837,6 @@ class HelpDialog(QDialog):
             self.browser.setTextCursor(first)
             self.browser.ensureCursorVisible()
 
-    # ---------- print ----------
-
-    def print_page(self):
-        printer = QPrinter(QPrinter.HighResolution)
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() == QDialog.Accepted:
-            self.browser.print_(printer)
 # =============================================================
 # MAIN APPLICATION
 # =============================================================
@@ -1937,13 +1858,7 @@ class DBCStudio(QMainWindow):
         self.settings = QSettings("DBCStudio", "DBCStudio")
         self.current_theme = self.settings.value("theme", "dark")
 
-        # Section-specific zoom state
-        self.zoom_levels = {}
-        self.zoom_target = None
-        self.zoom_overlay = None
-        self.zoom_overlay_timer = None
-        self.zoom_base_fonts = {}
-        self.zoom_base_stylesheets = {}
+
 
         self.setWindowTitle(
             "DBC Studio"
@@ -1986,7 +1901,6 @@ class DBCStudio(QMainWindow):
         self.save_current_file
         )
         QApplication.instance().installEventFilter(self)
-        self._setup_zoom_overlay()
 
     # =========================================================
     # MAIN UI
@@ -4721,193 +4635,6 @@ class DBCStudio(QMainWindow):
 
         self.update_statistics()
 
-    def _setup_zoom_overlay(self):
-        """Create the temporary section zoom control."""
-        self.zoom_overlay = QFrame(self)
-        self.zoom_overlay.setObjectName("zoomOverlay")
-        self.zoom_overlay.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
-        self.zoom_overlay.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.zoom_overlay.hide()
-
-        layout = QHBoxLayout(self.zoom_overlay)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.setSpacing(6)
-
-        title = QLabel("Zoom:")
-        self.zoom_overlay_percent = QLabel("100%")
-        self.zoom_overlay_minus = QToolButton()
-        self.zoom_overlay_plus = QToolButton()
-        self.zoom_overlay_reset = QToolButton()
-
-        self.zoom_overlay_minus.setText("−")
-        self.zoom_overlay_plus.setText("+")
-        self.zoom_overlay_reset.setText("↻")
-
-        for button in (
-            self.zoom_overlay_minus,
-            self.zoom_overlay_plus,
-            self.zoom_overlay_reset,
-        ):
-            button.setAutoRaise(True)
-            button.setFixedSize(28, 28)
-
-        layout.addWidget(title)
-        layout.addWidget(self.zoom_overlay_minus)
-        layout.addWidget(self.zoom_overlay_percent)
-        layout.addWidget(self.zoom_overlay_plus)
-        layout.addWidget(self.zoom_overlay_reset)
-
-        self.zoom_overlay.setStyleSheet("""
-            QFrame#zoomOverlay {
-                background: #252525;
-                border: 1px solid #555555;
-                border-radius: 8px;
-            }
-            QFrame#zoomOverlay QLabel {
-                color: white;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QFrame#zoomOverlay QToolButton {
-                color: white;
-                background: transparent;
-                border: none;
-                font-size: 18px;
-                font-weight: 600;
-                border-radius: 5px;
-            }
-            QFrame#zoomOverlay QToolButton:hover {
-                background: #3a3a3a;
-            }
-        """)
-
-        self.zoom_overlay_minus.clicked.connect(lambda: self.set_zoom(self._current_zoom() - 5))
-        self.zoom_overlay_plus.clicked.connect(lambda: self.set_zoom(self._current_zoom() + 5))
-        self.zoom_overlay_reset.clicked.connect(lambda: self.set_zoom(100))
-
-    def _zoom_section_target(self, widget):
-        """Return the smallest meaningful UI section containing widget."""
-        if widget is None or widget is self.zoom_overlay:
-            return self.main_container if hasattr(self, "main_container") else self.centralWidget()
-
-        # Do not zoom the temporary zoom control itself.
-        if isinstance(widget, QWidget) and self.zoom_overlay is not None and self.zoom_overlay.isAncestorOf(widget):
-            return self.zoom_target or (self.main_container if hasattr(self, "main_container") else self.centralWidget())
-
-        current = widget
-        while isinstance(current, QWidget) and current is not self:
-            name = current.objectName()
-            if name in {
-                "fileRow",
-                "fileList",
-                "sidebarTree",
-                "statCard",
-                "mainContainer",
-                "sidebar",
-                "searchBox",
-                "themeCombo",
-            }:
-                return current
-            current = current.parentWidget()
-
-        if hasattr(self, "main_container") and self.main_container.isAncestorOf(widget):
-            return self.main_container
-        if hasattr(self, "sidebar") and self.sidebar.isAncestorOf(widget):
-            return self.sidebar
-        return self.centralWidget()
-
-    def _current_zoom(self):
-        target = self.zoom_target
-        return self.zoom_levels.get(target, 100) if target is not None else 100
-
-    def _remember_zoom_base(self, target):
-        if target not in self.zoom_base_fonts:
-            self.zoom_base_fonts[target] = {}
-            self.zoom_base_stylesheets[target] = {}
-            widgets = [target] + target.findChildren(QWidget)
-            for widget in widgets:
-                self.zoom_base_fonts[target][widget] = QFont(widget.font())
-                self.zoom_base_stylesheets[target][widget] = widget.styleSheet()
-
-    def _apply_section_zoom(self, target, level):
-        if target is None:
-            return
-
-        self._remember_zoom_base(target)
-        ratio = level / 100.0
-
-        for widget, base_font in self.zoom_base_fonts[target].items():
-            if widget is None:
-                continue
-            font = QFont(base_font)
-            if base_font.pointSizeF() > 0:
-                font.setPointSizeF(max(6.0, base_font.pointSizeF() * ratio))
-            elif base_font.pixelSize() > 0:
-                font.setPixelSize(max(7, round(base_font.pixelSize() * ratio)))
-            widget.setFont(font)
-
-    def _restore_section_zoom(self, target):
-        if target not in self.zoom_base_fonts:
-            return
-        for widget, base_font in self.zoom_base_fonts[target].items():
-            if widget is not None:
-                widget.setFont(QFont(base_font))
-        self.zoom_levels[target] = 100
-
-    def _show_zoom_overlay(self, target, position=None):
-        if self.zoom_overlay is None:
-            self._setup_zoom_overlay()
-
-        self.zoom_target = target
-        self.zoom_overlay_percent.setText(f"{self._current_zoom()}%")
-        self.zoom_overlay.adjustSize()
-
-        if position is None:
-            position = QCursor.pos()
-        self.zoom_overlay.move(position + QPoint(12, 12))
-        self.zoom_overlay.show()
-        self.zoom_overlay.raise_()
-
-        if self.zoom_overlay_timer is not None:
-            try:
-                self.killTimer(self.zoom_overlay_timer)
-            except Exception:
-                pass
-        self.zoom_overlay_timer = self.startTimer(2200)
-
-    def timerEvent(self, event):
-        if self.zoom_overlay_timer is not None and event.timerId() == self.zoom_overlay_timer:
-            self.killTimer(self.zoom_overlay_timer)
-            self.zoom_overlay_timer = None
-            if self.zoom_overlay is not None:
-                self.zoom_overlay.hide()
-        else:
-            super().timerEvent(event)
-
-    def set_zoom(self, level):
-        target = self.zoom_target
-        if target is None:
-            return
-
-        level = max(70, min(150, int(level)))
-        self.zoom_levels[target] = level
-
-        if level == 100:
-            self._restore_section_zoom(target)
-        else:
-            self._apply_section_zoom(target, level)
-
-        if self.zoom_overlay is not None:
-            self.zoom_overlay_percent.setText(f"{level}%")
-            self.zoom_overlay.adjustSize()
-            self.zoom_overlay.show()
-            self.zoom_overlay.raise_()
-            if self.zoom_overlay_timer is not None:
-                try:
-                    self.killTimer(self.zoom_overlay_timer)
-                except Exception:
-                    pass
-            self.zoom_overlay_timer = self.startTimer(2200)
 
     def update_search_clear_button_style(self):
         if not hasattr(self, "search_clear_button"):
@@ -4950,27 +4677,13 @@ class DBCStudio(QMainWindow):
         )
 
     def apply_current_theme(self):
-        """Apply the selected theme without applying a global zoom."""
+        """Apply the selected theme."""
         base_style = LIGHT_STYLE if self.current_theme == "light" else DARK_STYLE
         app.setStyleSheet(base_style)
         self.update_search_clear_button_style()
 
-        # Re-apply only the currently zoomed sections after the theme changes.
-        for target, level in list(self.zoom_levels.items()):
-            try:
-                if target is not None and target != self.zoom_target and level != 100:
-                    self._apply_section_zoom(target, level)
-            except RuntimeError:
-                pass
-
-        if self.zoom_target is not None and self.zoom_levels.get(self.zoom_target, 100) != 100:
-            try:
-                self._apply_section_zoom(self.zoom_target, self.zoom_levels[self.zoom_target])
-            except RuntimeError:
-                pass
-
     def eventFilter(self, watched, event):
-        """Handle section selection, touchpad pinch zoom and Ctrl+wheel zoom."""
+        """Handle keyboard shortcuts for the database tree."""
         if event.type() == QEvent.KeyPress and (watched is self.sidebar_tree or watched is self.sidebar_tree.viewport()):
             item = self.sidebar_tree.currentItem()
             if item is not None:
@@ -5015,35 +4728,6 @@ class DBCStudio(QMainWindow):
                             self.delete_signal(data[1], data[2])
                         return True
 
-        if not isinstance(watched, QWidget):
-            return super().eventFilter(watched, event)
-
-        central = self.centralWidget()
-        if central is None or not (watched is central or central.isAncestorOf(watched)):
-            return super().eventFilter(watched, event)
-
-        if event.type() == QEvent.NativeGesture:
-            try:
-                gesture_type = event.gestureType()
-                if gesture_type == Qt.NativeGestureType.ZoomNativeGesture:
-                    target = self._zoom_section_target(watched)
-                    self.zoom_target = target
-                    value = event.value()
-                    if value:
-                        self.set_zoom(self._current_zoom() + (3 if value > 0 else -3))
-                        self._show_zoom_overlay(target, QCursor.pos())
-                        return True
-            except (AttributeError, TypeError, RuntimeError):
-                pass
-
-        if event.type() == QEvent.Wheel and event.modifiers() & Qt.ControlModifier:
-            delta = event.angleDelta().y()
-            if delta:
-                target = self._zoom_section_target(watched)
-                self.zoom_target = target
-                self.set_zoom(self._current_zoom() + (5 if delta > 0 else -5))
-                self._show_zoom_overlay(target, QCursor.pos())
-                return True
 
         return super().eventFilter(watched, event)
 
