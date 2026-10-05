@@ -17,7 +17,6 @@ from string import Template
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QTextDocument
 from PySide6.QtWidgets import QTextBrowser, QSplitter, QStackedWidget
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -1917,7 +1916,6 @@ class HelpDialog(QDialog):
         dialog = QPrintDialog(printer, self)
         if dialog.exec() == QDialog.Accepted:
             self.browser.print_(printer)
-
 # =============================================================
 # MAIN APPLICATION
 # =============================================================
@@ -5927,65 +5925,25 @@ class DBCStudio(QMainWindow):
     # =========================================================
     # HELP
     # =========================================================
+    def show_help(self, topic="intro"):
+        # The ? button passes a bool from clicked(), so fall back to Home
+        if not isinstance(topic, str):
+            topic = "intro"
+        HelpDialog(self, self.current_theme, topic).exec()
 
-    def show_help(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("DBC Studio Help")
-        dialog.resize(560, 520)
-
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(10)
-
-        text = QTextEdit()
-        text.setReadOnly(True)
-        text.setHtml("""
-            <h2>DBC Studio Help</h2>
-
-            <h3>Getting started</h3>
-            <ul>
-              <li><b>Import</b> or drag &amp; drop one or more <code>.dbc</code> files.</li>
-              <li><b>+ Create DBC</b> makes a new CAN or CAN FD database.</li>
-              <li><b>Export</b> saves the selected file as DBC, XML or CSV.</li>
-            </ul>
-
-            <h3>Database Structure</h3>
-            <ul>
-              <li>Hierarchy: <b>DBC file → Nodes → Messages → Signals</b>.</li>
-              <li>Right-click the DBC file to add a <b>New Node</b>.</li>
-              <li>Right-click a node to add a <b>New Message</b>.</li>
-              <li>Right-click a message to add a <b>New Signal</b> or open the editor.</li>
-              <li>Double-click a message or signal to open its editor.</li>
-            </ul>
-
-            <h3>Keyboard shortcuts</h3>
-            <ul>
-              <li><b>Ctrl+S</b> – Save current DBC</li>
-              <li><b>Ctrl+C / Ctrl+V</b> – Copy / paste node, message or signal</li>
-              <li><b>F2</b> – Rename selected item</li>
-              <li><b>Del</b> – Delete selected item</li>
-              <li><b>F1</b> – Open this help</li>
-              <li><b>Ctrl + mouse wheel</b> – Zoom the section under the cursor</li>
-            </ul>
-
-            <h3>Search</h3>
-            <p>Type a node, message or signal name, or a hex ID such as
-            <code>0x123</code>, in the search bar. Click × to clear it.</p>
-
-            <h3>Theme</h3>
-            <p>Use the theme button next to the search bar to switch
-            between light and dark mode.</p>
-        """)
-        layout.addWidget(text, 1)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        close_button = QPushButton("Close")
-        close_button.clicked.connect(dialog.accept)
-        buttons.addWidget(close_button)
-        layout.addLayout(buttons)
-
-        dialog.exec()
+    def show_context_help(self):
+        topic = "intro"
+        item = self.sidebar_tree.currentItem()
+        data = item.data(0, Qt.UserRole) if item is not None else None
+        if data:
+            topic = {
+                "file_root": "explorer",
+                "node": "nodes",
+                "message": "messages",
+                "signal": "signals",
+            }.get(data[0], "intro")
+        self.show_help(topic)
+    
     # =========================================================
     # THEME
     # =========================================================
