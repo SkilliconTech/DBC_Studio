@@ -257,11 +257,12 @@ class ArrowTree(QTreeWidget):
         painter.restore()
 
 class NewValueTableDialog(QDialog):
+    """Create or edit a signal value table (raw integer → readable string)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, name="", choices=None):
         super().__init__(parent)
-        self.setWindowTitle("New Value Table")
-        self.resize(420, 300)
+        self.setWindowTitle("Value Table" if choices else "New Value Table")
+        self.resize(420, 320)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
@@ -269,13 +270,20 @@ class NewValueTableDialog(QDialog):
 
         name_row = QHBoxLayout()
         name_row.addWidget(QLabel("Name:"))
-        self.name_edit = QLineEdit()
+        self.name_edit = QLineEdit(name or "")
+        self.name_edit.setPlaceholderText("Optional label (e.g. EngineState)")
         name_row.addWidget(self.name_edit, 1)
         root.addLayout(name_row)
+
+        hint = QLabel("Map raw signal values to readable text. Applied on Apply/OK in the Signal Editor.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 11px;")
+        root.addWidget(hint)
 
         self.table = QTableWidget(0, 2)
         self.table.setHorizontalHeaderLabels(["Value", "Description"])
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
         root.addWidget(self.table, 1)
 
         table_buttons = QHBoxLayout()
@@ -297,6 +305,17 @@ class NewValueTableDialog(QDialog):
         buttons.addWidget(ok_button)
         buttons.addWidget(cancel_button)
         root.addLayout(buttons)
+
+        # Pre-fill when editing an existing table
+        if choices:
+            for value, description in sorted(choices.items(), key=lambda x: x[0]):
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(str(value)))
+                self.table.setItem(row, 1, QTableWidgetItem(str(description)))
+        else:
+            # Start with one empty row for convenience
+            self.add_row()
 
     def add_row(self):
         row = self.table.rowCount()
@@ -322,13 +341,15 @@ class NewValueTableDialog(QDialog):
             if not value_text:
                 continue
             try:
-                value = int(value_text)
+                value = int(value_text, 0)  # supports 0xFF style
             except ValueError:
                 continue
             choices[value] = description
-        return self.name_edit.text().strip(), choices
-
-
+        name = self.name_edit.text().strip()
+        if not name and choices:
+            name = "Custom"
+        return name, choices
+  
 class SignalEditorDialog(QDialog):
 
     def __init__(self, parent, message, signal=None, on_changed=None):
@@ -338,6 +359,9 @@ class SignalEditorDialog(QDialog):
         self.original_signal = signal
         self.creating = signal is None
         self.on_changed = on_changed
+        # Pending value table (survives until Apply/OK, including for new signals)
+        self.pending_choices = None
+        self.pending_value_table_name = ""
 
         self.setWindowTitle("Signal Editor")
         self.setFixedWidth(850)
@@ -426,8 +450,10 @@ class SignalEditorDialog(QDialog):
         value_table_row.addWidget(QLabel("Value table:"))
         self.value_table_combo = QComboBox()
         self.value_table_combo.addItem("None")
+        self.value_table_combo.currentTextChanged.connect(self._on_value_table_combo_changed)
         value_table_row.addWidget(self.value_table_combo, 1)
         self.value_table_button = QPushButton("...")
+        self.value_table_button.setToolTip("Create or edit value table")
         self.value_table_button.clicked.connect(self.open_value_table)
         value_table_row.addWidget(self.value_table_button)
         properties_layout.addLayout(value_table_row)
@@ -897,16 +923,45 @@ class SignalEditorDialog(QDialog):
         # Kept for compatibility with the existing editor.
         return "\n".join(" ".join(f"{row * 8 + bit:02}" for bit in range(8)) for row in range(8))
 
+    def _on_value_table_combo_changed(self, text):
+        if text == "None":
+            self.pending_choices = None
+            self.pending_value_table_name = ""
+
     def open_value_table(self):
-        dialog = NewValueTableDialog(self)
+        # Prefer pending (unsaved) choices, otherwise load from signal
+        existing_choices = self.pending_choices
+        existing_name = self.pending_value_table_name
+        if existing_choices is None and self.signal is not None:
+            existing_choices = getattr(self.signal, "choices", None)
+            if existing_choices:
+                existing_name = self.value_table_combo.currentText()
+                if existing_name == "None":
+                    existing_name = "Custom"
+
+        dialog = NewValueTableDialog(
+            self,
+            name=existing_name or "",
+            choices=existing_choices if existing_choices else None
+        )
         if dialog.exec() == QDialog.Accepted:
             name, choices = dialog.get_data()
-            if name:
-                if self.value_table_combo.findText(name) < 0:
-                    self.value_table_combo.addItem(name)
-                self.value_table_combo.setCurrentText(name)
-                if self.signal is not None:
-                    self.signal.choices = choices
+            if choices:
+                display_name = name or "Custom"
+                # Update combo without triggering clear
+                self.value_table_combo.blockSignals(True)
+                if self.value_table_combo.findText(display_name) < 0:
+                    self.value_table_combo.addItem(display_name)
+                self.value_table_combo.setCurrentText(display_name)
+                self.value_table_combo.blockSignals(False)
+                self.pending_choices = choices
+                self.pending_value_table_name = display_name
+            else:
+                self.value_table_combo.blockSignals(True)
+                self.value_table_combo.setCurrentText("None")
+                self.value_table_combo.blockSignals(False)
+                self.pending_choices = None
+                self.pending_value_table_name = ""
 
     def table_signal_selected(self):
         selected = self.signal_table.selectedItems()
@@ -938,6 +993,25 @@ class SignalEditorDialog(QDialog):
             self.maximum_edit.setValue(0.0)
         self.unit_edit.setText(signal.unit or "")
         self.multiplex_check.setChecked(bool(signal.is_multiplexer))
+        # Load value table (choices)
+        choices = getattr(signal, "choices", None)
+        self.value_table_combo.blockSignals(True)
+        if choices:
+            self.pending_choices = dict(choices)
+            display_name = "Custom"
+            if self.value_table_combo.findText(display_name) < 0:
+                self.value_table_combo.addItem(display_name)
+            self.value_table_combo.setCurrentText(display_name)
+            self.pending_value_table_name = display_name
+        else:
+            self.pending_choices = None
+            self.pending_value_table_name = ""
+            self.value_table_combo.setCurrentText("None")
+        self.value_table_combo.blockSignals(False)
+
+        self.creating = False
+        self.update_title()
+        self.update_bit_map()
         self.creating = False
         self.update_title()
         self.update_bit_map()
@@ -962,68 +1036,83 @@ class SignalEditorDialog(QDialog):
         self.unit_edit.clear()
         self.default_edit.clear()
         self.multiplex_check.setChecked(False)
+        self.pending_choices = None
+        self.pending_value_table_name = ""
+        self.value_table_combo.blockSignals(True)
+        self.value_table_combo.setCurrentText("None")
+        self.value_table_combo.blockSignals(False)
         self.signal_table.clearSelection()
         self.update_title()
         self.update_bit_map()
 
     def apply_changes(self, show_message=True):
-        try:
-            name = self.name_edit.text().strip()
-            if not name:
-                raise ValueError("Signal name cannot be empty.")
+       try:
+         name = self.name_edit.text().strip()
+         if not name:
+            raise ValueError("Signal name cannot be empty.")
 
-            start = self.start_edit.value()
-            length = self.length_edit.value()
+         start = self.start_edit.value()
+         length = self.length_edit.value()
 
-            if not self.validate_bit_selection():
-                return False
-
-            if self.creating:
-                signal = cantools.database.can.Signal(
-                    name=name,
-                    start=start,
-                    length=length,
-                    byte_order="little_endian" if self.byte_order_combo.currentText() == "Intel(Little)" else "big_endian",
-                    is_signed=self.value_type_combo.currentText() == "Signed",
-                    minimum=self.minimum_edit.value(),
-                    maximum=self.maximum_edit.value(),
-                    unit=self.unit_edit.text().strip(),
-                    comment=self.description_edit.toPlainText().strip(),
-                    is_multiplexer=self.multiplex_check.isChecked()
-                )
-                signal.scale = self.factor_edit.value()
-                signal.offset = self.offset_edit.value()
-                self.message.signals.append(signal)
-                self.signal = signal
-                self.original_signal = signal
-                self.creating = False
-                message = "New signal created successfully."
-            else:
-                self.signal.name = name
-                self.signal.comment = self.description_edit.toPlainText().strip()
-                self.signal.start = start
-                self.signal.length = length
-                self.signal.byte_order = "little_endian" if self.byte_order_combo.currentText() == "Intel(Little)" else "big_endian"
-                self.signal.is_signed = self.value_type_combo.currentText() == "Signed"
-                self.signal.scale = self.factor_edit.value()
-                self.signal.offset = self.offset_edit.value()
-                self.signal.minimum = self.minimum_edit.value()
-                self.signal.maximum = self.maximum_edit.value()
-                self.signal.unit = self.unit_edit.text().strip()
-                self.signal.is_multiplexer = self.multiplex_check.isChecked()
-                message = "Signal changes applied."
-
-            self.refresh_table()
-            self.update_title()
-            if self.on_changed:
-                self.on_changed()
-            if show_message:
-                QMessageBox.information(self, "Applied", message)
-            return True
-        except Exception as error:
-            QMessageBox.warning(self, "Error", str(error))
+         if not self.validate_bit_selection():
             return False
 
+         # Resolve value table (choices) to apply
+         if self.value_table_combo.currentText() == "None":
+            choices_to_apply = None
+         else:
+            choices_to_apply = self.pending_choices
+
+         if self.creating:
+            signal = cantools.database.can.Signal(
+                name=name,
+                start=start,
+                length=length,
+                byte_order="little_endian" if self.byte_order_combo.currentText() == "Intel(Little)" else "big_endian",
+                is_signed=self.value_type_combo.currentText() == "Signed",
+                minimum=self.minimum_edit.value(),
+                maximum=self.maximum_edit.value(),
+                unit=self.unit_edit.text().strip(),
+                comment=self.description_edit.toPlainText().strip(),
+                is_multiplexer=self.multiplex_check.isChecked()
+                # ← NO choices= here
+            )
+            signal.scale = self.factor_edit.value()
+            signal.offset = self.offset_edit.value()
+            signal.choices = choices_to_apply          # ← set after creation
+
+            self.message.signals.append(signal)
+            self.signal = signal
+            self.original_signal = signal
+            self.creating = False
+            message = "New signal created successfully."
+         else:
+            self.signal.name = name
+            self.signal.comment = self.description_edit.toPlainText().strip()
+            self.signal.start = start
+            self.signal.length = length
+            self.signal.byte_order = "little_endian" if self.byte_order_combo.currentText() == "Intel(Little)" else "big_endian"
+            self.signal.is_signed = self.value_type_combo.currentText() == "Signed"
+            self.signal.scale = self.factor_edit.value()
+            self.signal.offset = self.offset_edit.value()
+            self.signal.minimum = self.minimum_edit.value()
+            self.signal.maximum = self.maximum_edit.value()
+            self.signal.unit = self.unit_edit.text().strip()
+            self.signal.is_multiplexer = self.multiplex_check.isChecked()
+            self.signal.choices = choices_to_apply     # ← set here
+            message = "Signal changes applied."
+
+         self.refresh_table()
+         self.update_title()
+         if self.on_changed:
+             self.on_changed()
+         if show_message:
+             QMessageBox.information(self, "Applied", message)
+         return True
+       except Exception as error:
+        QMessageBox.warning(self, "Error", str(error))
+        return False
+    
     def refresh_table(self):
         self.signal_table.setRowCount(len(self.message.signals))
         for row, signal in enumerate(self.message.signals):
@@ -1065,14 +1154,21 @@ class SignalEditorDialog(QDialog):
             QMessageBox.warning(self, "Delete Error", str(error))
 
     def copy_signal(self):
-        if self.signal is None:
-            return
-        self.name_edit.setText(self.signal.name + "_copy")
-        self.creating = True
-        self.signal = None
-        self.original_signal = None
-        self.update_title()
-
+     if self.signal is None:
+        return
+     # Keep current value table as pending so the copy inherits it
+     if self.pending_choices is None:
+        existing = getattr(self.signal, "choices", None)
+        if existing:
+            self.pending_choices = dict(existing)
+            self.pending_value_table_name = self.value_table_combo.currentText()
+            if self.pending_value_table_name == "None":
+                self.pending_value_table_name = "Custom"
+     self.name_edit.setText(self.signal.name + "_copy")
+     self.creating = True
+     self.signal = None
+     self.original_signal = None
+     self.update_title()
 
 # =============================================================
 # MESSAGE EDITOR
@@ -1570,6 +1666,7 @@ HELP_TOPICS = [
 
     ("about", "About DBC Studio", """
         <p>DBC Studio is built with Python, <b>PySide6</b> (Qt) and <b>cantools</b>.</p>
+        <p>Designed By SKILLICON TECHNOLOGIES.</p>
     """, []),
 ]
 
@@ -1694,6 +1791,12 @@ class HelpDialog(QDialog):
         self.browser.setOpenLinks(False)
         self.browser.anchorClicked.connect(self._link)
         right_layout.addWidget(self.browser, 1)
+        self.credit = QLabel()
+        self.credit.setObjectName("helpCredit")
+        self.credit.setTextFormat(Qt.RichText)
+        self.credit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.credit.hide()
+        right_layout.addWidget(self.credit)
 
         nav = QHBoxLayout()
         self.btn_prev = QPushButton("◀  Previous")
@@ -1746,6 +1849,12 @@ class HelpDialog(QDialog):
             }
             QLabel#helpCrumb { color: $muted; font-size: 12px; }
         """).safe_substitute(self.colors))
+        c = self.colors
+        self.credit.setText(
+            f'<span style="color:{c["muted"]}; font-size:11px;"> &nbsp;D E S I G N E D &nbsp; B Y</span><br>'
+            f'<span style="color:#E6B800; font-size:16px; font-weight:700;">'
+            f'SKILLICON TECHNOLOGIES</span>'
+        )
 
     def _css(self):
         return Template("""
@@ -1773,6 +1882,7 @@ class HelpDialog(QDialog):
             self.hist_pos = len(self.history) - 1
 
         self.current = tid
+        self.credit.setVisible(tid == "about")
         topic = self.topics[tid]
         self.browser.setHtml(
             f"<html><head><style>{self._css()}</style></head><body>"
@@ -3222,89 +3332,71 @@ class DBCStudio(QMainWindow):
 
     def paste_signal(self, target_message):
 
-        if target_message is None or self.copied_signal is None:
-            return
+      if target_message is None or self.copied_signal is None:
+        return
 
-        source_message, source_signal = self.copied_signal
+      source_message, source_signal = self.copied_signal
 
-        existing_names = {
-            signal.name
-            for signal in target_message.signals
-        }
+      existing_names = {
+        signal.name
+        for signal in target_message.signals
+      }
 
-        base_name = source_signal.name + "_copy"
-        new_name = base_name
-        index = 2
+      base_name = source_signal.name + "_copy"
+      new_name = base_name
+      index = 2
 
-        while new_name in existing_names:
-            new_name = f"{base_name}{index}"
-            index += 1
+      while new_name in existing_names:
+        new_name = f"{base_name}{index}"
+        index += 1
 
-        try:
+      try:
+          # Get value table (choices) from source signal
+          source_choices = getattr(source_signal, "choices", None)
 
-            new_signal = cantools.database.can.Signal(
-                name=new_name,
-                start=source_signal.start,
-                length=source_signal.length,
-                byte_order=source_signal.byte_order,
-                is_signed=source_signal.is_signed,
-                minimum=source_signal.minimum,
-                maximum=source_signal.maximum,
-                unit=source_signal.unit,
-                comment=getattr(
-                    source_signal,
-                    "comment",
-                    ""
-                ) or "",
-                is_multiplexer=source_signal.is_multiplexer,
-                multiplexer_ids=getattr(
-                    source_signal,
-                    "multiplexer_ids",
-                    None
-                ),
-                multiplexer_signal=getattr(
-                    source_signal,
-                    "multiplexer_signal",
-                    None
-                )
+          new_signal = cantools.database.can.Signal(
+            name=new_name,
+            start=source_signal.start,
+            length=source_signal.length,
+            byte_order=source_signal.byte_order,
+            is_signed=source_signal.is_signed,
+            minimum=source_signal.minimum,
+            maximum=source_signal.maximum,
+            unit=source_signal.unit,
+            comment=getattr(source_signal, "comment", "") or "",
+            is_multiplexer=source_signal.is_multiplexer,
+            multiplexer_ids=getattr(source_signal, "multiplexer_ids", None),
+            multiplexer_signal=getattr(source_signal, "multiplexer_signal", None)
+            # ← do NOT pass choices= here (causes error on your cantools version)
+           )
+
+           # Set scale, offset and choices AFTER creation
+          new_signal.scale = getattr(source_signal, "scale", 1.0)
+          new_signal.offset = getattr(source_signal, "offset", 0.0)
+          new_signal.choices = dict(source_choices) if source_choices else None
+
+          target_message.signals.append(new_signal)
+
+          self.update_database_tree(
+            force_expand_key=(
+                "message",
+                target_message.frame_id,
+                target_message.name
             )
+          )
+          self.update_statistics()
+          self.show_signal_details(
+            target_message,
+            new_signal
+          )
 
-            new_signal.scale = getattr(
-                source_signal,
-                "scale",
-                1.0
-            )
+      except Exception as error:
 
-            new_signal.offset = getattr(
-                source_signal,
-                "offset",
-                0.0
-            )
-
-            target_message.signals.append(
-                new_signal
-            )
-
-            self.update_database_tree(
-                force_expand_key=(
-                    "message",
-                    target_message.frame_id,
-                    target_message.name
-                )
-            )
-            self.update_statistics()
-            self.show_signal_details(
-                target_message,
-                new_signal
-            )
-
-        except Exception as error:
-
-            QMessageBox.warning(
-                self,
-                "Paste Signal Error",
-                str(error)
-            )
+         QMessageBox.warning(
+            self,
+            "Paste Error",
+            str(error)
+         )
 
     def rename_signal(self, message, signal):
 
@@ -5363,6 +5455,20 @@ class DBCStudio(QMainWindow):
             else
             "Not specified"
         )
+        # Value table summary
+        choices = getattr(signal, "choices", None)
+        if choices:
+            summary_parts = [
+                f"{value} = {desc}"
+                for value, desc in sorted(choices.items(), key=lambda x: x[0])
+            ]
+            if len(summary_parts) > 8:
+                shown = ", ".join(summary_parts[:8]) + f"  … (+{len(summary_parts) - 8} more)"
+            else:
+                shown = ", ".join(summary_parts)
+            self.add_detail("Value Table", shown)
+        else:
+            self.add_detail("Value Table", "None")
 
         self.main_layout.addStretch()
 
