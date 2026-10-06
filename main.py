@@ -1408,9 +1408,6 @@ HELP_TOPICS = [
               <li>Right-click items to add nodes, messages and signals.</li>
               <li>Press <code>Ctrl+S</code> to save.</li>
             </ol>
-        """ + _box("tip", "Press <code>F1</code> at any time. Help opens on the topic that matches what you have selected."), []),
-        ("layout", "Window layout", """
-            <ul>
               <li><b>Left sidebar</b> - the list of open DBC files, the
                   <b>Create DBC / Import / Export</b> buttons, and the database tree.</li>
               <li><b>Top bar</b> - page title, theme button, help button and search box.</li>
@@ -1573,7 +1570,6 @@ HELP_TOPICS = [
 
     ("about", "About DBC Studio", """
         <p>DBC Studio is built with Python, <b>PySide6</b> (Qt) and <b>cantools</b>.</p>
-        <p>Press <code>F1</code> any time to come back to this help.</p>
     """, []),
 ]
 
@@ -1937,9 +1933,8 @@ class DBCStudio(QMainWindow):
         QKeySequence("Ctrl+S"),
         self
         )
-        self.help_shortcut = QShortcut(QKeySequence("F1"), self)
-        self.help_shortcut.activated.connect(self.show_context_help)
         self.save_shortcut.activated.connect(
+
         self.save_current_file
         )
         QApplication.instance().installEventFilter(self)
@@ -2087,7 +2082,7 @@ class DBCStudio(QMainWindow):
         self.help_button.setObjectName("helpButton")
         self.help_button.setText("?")
         self.help_button.setFixedSize(42, 42)
-        self.help_button.setToolTip("Help (F1)")
+        self.help_button.setToolTip("Help")
         self.help_button.setCursor(QCursor(Qt.PointingHandCursor))
         self.help_button.clicked.connect(self.show_help)
         header.addWidget(self.help_button)
@@ -5661,18 +5656,6 @@ class DBCStudio(QMainWindow):
             topic = "intro"
         HelpDialog(self, self.current_theme, topic).exec()
 
-    def show_context_help(self):
-        topic = "intro"
-        item = self.sidebar_tree.currentItem()
-        data = item.data(0, Qt.UserRole) if item is not None else None
-        if data:
-            topic = {
-                "file_root": "explorer",
-                "node": "nodes",
-                "message": "messages",
-                "signal": "signals",
-            }.get(data[0], "intro")
-        self.show_help(topic)
     
     # =========================================================
     # THEME
