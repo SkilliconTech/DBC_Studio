@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('dbc_studio.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
