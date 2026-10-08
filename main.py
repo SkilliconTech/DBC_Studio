@@ -276,7 +276,7 @@ class NewValueTableDialog(QDialog):
         name_row.addWidget(self.name_edit, 1)
         root.addLayout(name_row)
 
-        hint = QLabel("Map raw signal values to readable text. Applied on Apply/OK in the Signal Editor.")
+        hint = QLabel("Value must be a number (0, 1, 2, 255, 0xFF...). Description can be any text.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #888; font-size: 11px;")
         root.addWidget(hint)
@@ -307,7 +307,6 @@ class NewValueTableDialog(QDialog):
         buttons.addWidget(cancel_button)
         root.addLayout(buttons)
 
-        # Pre-fill when editing an existing table
         if choices:
             for value, description in sorted(choices.items(), key=lambda x: x[0]):
                 row = self.table.rowCount()
@@ -315,7 +314,6 @@ class NewValueTableDialog(QDialog):
                 self.table.setItem(row, 0, QTableWidgetItem(str(value)))
                 self.table.setItem(row, 1, QTableWidgetItem(str(description)))
         else:
-            # Start with one empty row for convenience
             self.add_row()
 
     def add_row(self):
@@ -332,20 +330,41 @@ class NewValueTableDialog(QDialog):
 
     def get_data(self):
         choices = {}
+        invalid_rows = []
+
         for row in range(self.table.rowCount()):
             value_item = self.table.item(row, 0)
             description_item = self.table.item(row, 1)
-            if value_item is None:
-                continue
-            value_text = value_item.text().strip()
+
+            value_text = value_item.text().strip() if value_item else ""
             description = description_item.text().strip() if description_item else ""
+
+            if not value_text and not description:
+                continue  # completely empty row → ignore
+
             if not value_text:
+                invalid_rows.append(row + 1)
                 continue
+
             try:
-                value = int(value_text, 0)  # supports 0xFF style
+                value = int(value_text, 0)  # supports 0xFF, 0b1010, etc.
             except ValueError:
+                invalid_rows.append(row + 1)
                 continue
+
             choices[value] = description
+
+        if invalid_rows:
+            QMessageBox.warning(
+                self,
+                "Invalid Value",
+                f"Value column must contain only numbers.\n"
+                f"Problem in row(s): {', '.join(map(str, invalid_rows))}\n\n"
+                f"Example of correct entries:\n"
+                f"0 → Off\n1 → On\n2 → Error"
+            )
+            return None, None   # signal that data is invalid
+
         name = self.name_edit.text().strip()
         if not name and choices:
             name = "Custom"
@@ -930,40 +949,47 @@ class SignalEditorDialog(QDialog):
             self.pending_value_table_name = ""
 
     def open_value_table(self):
-        # Prefer pending (unsaved) choices, otherwise load from signal
-        existing_choices = self.pending_choices
-        existing_name = self.pending_value_table_name
-        if existing_choices is None and self.signal is not None:
-            existing_choices = getattr(self.signal, "choices", None)
-            if existing_choices:
-                existing_name = self.value_table_combo.currentText()
-                if existing_name == "None":
-                    existing_name = "Custom"
+     # Prefer pending (unsaved) choices, otherwise load from signal
+     existing_choices = self.pending_choices
+     existing_name = self.pending_value_table_name
 
-        dialog = NewValueTableDialog(
-            self,
-            name=existing_name or "",
-            choices=existing_choices if existing_choices else None
-        )
-        if dialog.exec() == QDialog.Accepted:
-            name, choices = dialog.get_data()
-            if choices:
-                display_name = name or "Custom"
-                # Update combo without triggering clear
-                self.value_table_combo.blockSignals(True)
-                if self.value_table_combo.findText(display_name) < 0:
-                    self.value_table_combo.addItem(display_name)
-                self.value_table_combo.setCurrentText(display_name)
-                self.value_table_combo.blockSignals(False)
-                self.pending_choices = choices
-                self.pending_value_table_name = display_name
-            else:
-                self.value_table_combo.blockSignals(True)
-                self.value_table_combo.setCurrentText("None")
-                self.value_table_combo.blockSignals(False)
-                self.pending_choices = None
-                self.pending_value_table_name = ""
+     if existing_choices is None and self.signal is not None:
+        existing_choices = getattr(self.signal, "choices", None)
+        if existing_choices:
+            existing_name = self.value_table_combo.currentText()
+            if existing_name == "None":
+                existing_name = "Custom"
 
+     dialog = NewValueTableDialog(
+        self,
+        name=existing_name or "",
+        choices=existing_choices if existing_choices else None
+       )
+
+     if dialog.exec() == QDialog.Accepted:
+        name, choices = dialog.get_data()
+
+        if name is None and choices is None:
+            # User had invalid data – keep dialog open was already handled
+            return
+
+        if choices:
+            display_name = name or "Custom"
+            self.value_table_combo.blockSignals(True)
+            if self.value_table_combo.findText(display_name) < 0:
+                self.value_table_combo.addItem(display_name)
+            self.value_table_combo.setCurrentText(display_name)
+            self.value_table_combo.blockSignals(False)
+
+            self.pending_choices = choices
+            self.pending_value_table_name = display_name
+        else:
+            # Empty table → clear
+            self.value_table_combo.blockSignals(True)
+            self.value_table_combo.setCurrentText("None")
+            self.value_table_combo.blockSignals(False)
+            self.pending_choices = None
+            self.pending_value_table_name = ""
     def table_signal_selected(self):
         selected = self.signal_table.selectedItems()
         if not selected or self.creating:
