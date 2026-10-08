@@ -13,11 +13,11 @@ SetupIconFile=D:\DBC_viewer\dbc_studio.ico
 UninstallDisplayIcon={app}\DBCStudio.exe
 
 [Files]
-Source: "D:\DBC_viewer\dist\DBCStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "D:\DBC_viewer\dist\DBC Studio.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\DBC Studio"; Filename: "{app}\DBCStudio.exe"
-Name: "{commondesktop}\DBC Studio"; Filename: "{app}\DBCStudio.exe"
+Name: "{group}\DBC Studio"; Filename: "{app}\DBC Studio.exe"
+Name: "{commondesktop}\DBC Studio"; Filename: "{app}\DBC Studio.exe"
 
 [Run]
-Filename: "{app}\DBCStudio.exe"; Description: "Launch DBC Studio"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\DBC Studio.exe"; Description: "Launch DBC Studio"; Flags: nowait postinstall skipifsilent
